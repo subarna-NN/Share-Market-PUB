@@ -378,7 +378,7 @@ if __name__ == "__main__":
     RESULTS = {}
     for ALPHA in (0.6, 0.8, 0.95):
         print("\n" + "#" * 62)
-        print(f"#  TASK 1 (drift-sign fix) — alpha={ALPHA}  dtype={DTYPE}")
+        print(f"#  Drift-sign fix — alpha={ALPHA}  dtype={DTYPE}")
         print("#" * 62)
 
         grid_convergence_report(ALPHA, 1.0, 0.02, -0.25, 0.25, 0.5, 0.07)
@@ -394,20 +394,20 @@ if __name__ == "__main__":
         plot_all(hist, ev)
         RESULTS[ALPHA] = ev
         print("\n" + "=" * 60)
-        print(f"  TASK 1 COMPLETE — alpha={ALPHA} (mean-reverting drift)")
+        print(f" COMPLETE — alpha={ALPHA} (mean-reverting drift)")
         print(f"  rel-L2 = {ev['rel_l2']:.3e}   RMSE = {ev['rmse']:.3e}   "
               f"Linf = {ev['linf']:.3e}")
         print(f"  mass GL-401 (accurate): {ev['mass_gl'].min():.5f} .. {ev['mass_gl'].max():.5f}")
         print("=" * 60)
 
     print("\n" + "=" * 60)
-    print("  TASK 1 SUMMARY — drift-sign fix, three alpha values")
+    print("  SUMMARY — drift-sign fix, three alpha values")
     print("  (compare against the OLD repulsive-drift numbers:")
     print("   old: a=0.6 rel-L2=6.11e-3, a=0.8=4.05e-3, a=0.95=3.27e-3)")
     print("=" * 60)
     for a, ev in RESULTS.items():
         print(f"  alpha={a:<4}  rel-L2={ev['rel_l2']:.3e}  RMSE={ev['rmse']:.3e}  "
               f"Linf={ev['linf']:.3e}  GL-mass=[{ev['mass_gl'].min():.5f},{ev['mass_gl'].max():.5f}]")
-    print("  Expect: similar accuracy (physics correctness doesn't change PINN's ability")
-    print("  to match its reference), exact mass, and density now CONTRACTING toward")
-    print("  the OU equilibrium instead of spreading to the walls.")
+    print(" ")
+    print(" ")
+    print(" ")
