@@ -7,17 +7,11 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
-# ---------------------------------------------------------------------
-#  PRECISION SWITCH 
-# ---------------------------------------------------------------------
-DTYPE = 'float64'                      
+DTYPE = 'float64'
 torch.set_default_dtype(torch.float64 if DTYPE == 'float64' else torch.float32)
 NP = np.float64 if DTYPE == 'float64' else np.float32
 
 
-# =====================================================================
-#  PART 1   
-# =====================================================================
 def l1_weights(alpha, n):
     j = np.arange(n, dtype=np.float64)
     return ((j + 1.0) ** (1.0 - alpha) - j ** (1.0 - alpha)).astype(NP)
@@ -26,7 +20,7 @@ def l1_weights(alpha, n):
 def op_noflux(x, gamma, D):
     Nx = len(x); dx = x[1] - x[0]; A = np.zeros((Nx, Nx), dtype=NP)
     for i in range(Nx - 1):
-        xh = 0.5 * (x[i] + x[i + 1]); a = -gamma * xh   # <-- mu = -gamma*x (mean-reverting)
+        xh = 0.5 * (x[i] + x[i + 1]); a = -gamma * xh
         cf_i = a * 0.5 + D / dx
         cf_ip = a * 0.5 - D / dx
         A[i, i]     += -cf_i / dx
@@ -77,9 +71,6 @@ def grid_convergence_report(alpha, gamma, D, x_min, x_max, T, s_ic):
     print(f"    self rel-L2 (201 vs 401) = {e23:.3e}  (shrinking => converged)")
 
 
-# =====================================================================
-#  PART 2 
-# =====================================================================
 class MLP(nn.Module):
     def __init__(self, in_dim=2, hidden_layers=4, hidden=64):
         super().__init__()
@@ -122,7 +113,7 @@ class EnergyDensity(nn.Module):
             tq = t_col.view(M, 1).expand(M, Q).reshape(-1, 1)
             fq = self.f(xq, tq).view(M, Q)
             logdx = math.log(self.dx_norm)
-            return torch.logsumexp(fq + logdx, dim=1)     # log( dx * sum exp f )
+            return torch.logsumexp(fq + logdx, dim=1)
         else:
             Q = self.xq.shape[0]
             xq = self.xq.view(1, Q).expand(M, Q).reshape(-1, 1)
@@ -138,37 +129,33 @@ class EnergyDensity(nn.Module):
         return torch.exp(self.log_p(x, t))
 
 
-# =====================================================================
-#  PART 3 
-# =====================================================================
 class CaputoResidual:
     def __init__(self, alpha, T, gamma, D, device, x_grid, N_hist=81):
         self.alpha = alpha; self.gamma = gamma; self.D = D
         self.device = device; self.T = T; self.N_hist = N_hist
-        self.xg = x_grid                                  # (Nx,) uniform
+        self.xg = x_grid
         self.dx = (x_grid[1] - x_grid[0]).item()
         self.Nx = x_grid.shape[0]
         self.th = torch.linspace(0.0, T, N_hist, device=device)
         self.dt_h = (self.th[1] - self.th[0]).item()
         self.sigma = 1.0 / (Gamma(2.0 - alpha) * self.dt_h ** alpha)
         self.b = torch.tensor(l1_weights(alpha, N_hist), device=device)
-        # cached flattened (Nh x Nx) input grid
         Nh, Nx = N_hist, self.Nx
         self.Xflat = x_grid.view(1, Nx).expand(Nh, Nx).reshape(-1, 1)
         self.Tflat = self.th.view(Nh, 1).expand(Nh, Nx).reshape(-1, 1)
-        self.xin = x_grid[1:-1].view(1, -1)               # interior coords
+        self.xin = x_grid[1:-1].view(1, -1)
 
     def __call__(self, model, n_tc, gen):
         Nh, Nx, dx = self.N_hist, self.Nx, self.dx
-        f_grid = model.f(self.Xflat, self.Tflat).view(Nh, Nx)   
-        logZ_row = model.log_Z(self.th.view(Nh, 1)).view(Nh, 1)   
-        P = torch.exp(f_grid - logZ_row)                  
+        f_grid = model.f(self.Xflat, self.Tflat).view(Nh, Nx)
+        logZ_row = model.log_Z(self.th.view(Nh, 1)).view(Nh, 1)
+        P = torch.exp(f_grid - logZ_row)
         px = (P[:, 2:] - P[:, :-2]) / (2 * dx)
         pxx = (P[:, 2:] - 2 * P[:, 1:-1] + P[:, :-2]) / dx**2
         Pin = P[:, 1:-1]
-        Lp = self.gamma * (Pin + self.xin * px) + self.D * pxx   # (Nh, Nx-2)
+        Lp = self.gamma * (Pin + self.xin * px) + self.D * pxx
 
-        dP = Pin[1:] - Pin[:-1]                            # (Nh-1, Nx-2)
+        dP = Pin[1:] - Pin[:-1]
         Nt = Nh - 1
         n_tc = min(n_tc, Nt)
         sel = torch.randperm(Nt, generator=gen, device=self.device)[:n_tc] + 1
@@ -176,7 +163,7 @@ class CaputoResidual:
         idx_m = torch.arange(Nt, device=self.device).view(1, Nt)
         k = idx_n - idx_m; mask = (k >= 0)
         Wsub = torch.where(mask, self.b[k.clamp(min=0)], torch.zeros_like(self.b[0]))
-        caputo = self.sigma * (Wsub @ dP)                 # (n_tc, Nx-2)
+        caputo = self.sigma * (Wsub @ dP)
         r = caputo - Lp[sel]
         return (r ** 2).mean()
 
@@ -197,7 +184,6 @@ def noflux_bc_loss(model, t_grid, gamma, D, x_min, x_max, n_sample=64, gen=None)
         p = model.p(xb, tb)
         dp = torch.autograd.grad(p, xb, torch.ones_like(p),
                                  create_graph=True, retain_graph=True)[0].squeeze(-1)
-        # no-flux: J = mu*p - D*p_x = -gamma*x*p - D*p_x = 0 at walls (mu=-gamma*x)
         J = -gamma * xb.squeeze(-1) * p - D * dp
         losses.append((J ** 2).mean())
     return sum(losses)
@@ -208,9 +194,6 @@ def ic_loss(model, x_col, p0_col):
     return ((model.p(x_col, t0) - p0_col.squeeze(-1)) ** 2).mean()
 
 
-# =====================================================================
-#  PART 4 
-# =====================================================================
 def train_forward(alpha=0.8, gamma=1.0, D=0.02,
                   x_min=-0.25, x_max=0.25,
                   Nx_ref=401, T=0.5, Nt_ref=400, s_ic=0.07,
@@ -230,12 +213,13 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
                                             Nx_ref, T, Nt_ref, s_ic)
     m0 = dx_ref * P_ref[0].sum(); mT = dx_ref * P_ref[-1].sum()
     print(f"  reference: mass t0={m0:.6f} tT={mT:.6f} drift={abs(mT-m0):.1e}")
+
     model = EnergyDensity(x_min, x_max, n_quad=128,
                           hidden_layers=hidden_layers, hidden=hidden,
                           norm='quad').to(device)
 
     x_col = torch.linspace(x_min, x_max, Nx_col + 2)[1:-1].view(-1, 1).to(device)
-    x_grid_res = torch.linspace(x_min, x_max, Nx_col, device=device)  # residual FD grid (fast)
+    x_grid_res = torch.linspace(x_min, x_max, Nx_col, device=device)
     t_grid = torch.tensor(t_ref, device=device)
     xc = x_col.cpu().numpy().ravel()
     p0c = normalize_dxsum(gaussian(x_ref, s_ic), dx_ref)
@@ -248,7 +232,6 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
     hist = {'step': [], 'total': [], 'pde': [], 'ic': [], 'bc': []}
     t0 = time.time()
 
-    # Phase A
     tw = time.time()
     for step in range(1, n_warm + 1):
         model.train()
@@ -259,7 +242,6 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
             print(f"    [warm] {step:5d}/{n_warm}  ic={l_ic.item():.3e}  "
                   f"{sps*1000:.1f} ms/step  ({1/sps:.1f} it/s)")
 
-    # Phase B
     best_loss = float('inf'); best_state = None
     tb = time.time()
     for step in range(1, n_adam + 1):
@@ -286,7 +268,6 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
         model.load_state_dict(best_state)
         print(f"  restored best Adam checkpoint (loss={best_loss:.3e})")
 
-    # Phase C
     if n_lbfgs > 0:
         res_full = CaputoResidual(alpha, T, gamma, D, device, x_grid_res, N_hist=161)
         opt_lb = torch.optim.LBFGS(model.parameters(), max_iter=n_lbfgs,
@@ -294,7 +275,7 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
                                    history_size=60, line_search_fn='strong_wolfe')
         def closure():
             opt_lb.zero_grad()
-            l_pde = res_full(model, res_full.N_hist - 1, gen)   # all history times
+            l_pde = res_full(model, res_full.N_hist - 1, gen)
             l_ic = ic_loss(model, x_col, p0_col)
             l_bc = noflux_bc_loss(model, t_grid, gamma, D, x_min, x_max)
             loss = w_pde * l_pde + w_ic * l_ic + w_bc * l_bc
@@ -312,12 +293,12 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
             print(f"  L-BFGS stopped: {e}")
 
     print(f"  total wall {time.time()-t0:.1f}s")
+
     model.eval()
     Xr, Tr = np.meshgrid(x_ref, t_ref, indexing='xy')
     xq = torch.tensor(Xr.ravel(), device=device).view(-1, 1)
     tq = torch.tensor(Tr.ravel(), device=device).view(-1, 1)
     with torch.no_grad():
-        # chunk to keep memory sane on big grids
         outs = []
         B = 20000
         for i in range(0, xq.shape[0], B):
@@ -328,7 +309,8 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
     rmse = float(np.sqrt((err ** 2).mean()))
     linf = float(np.abs(err).max())
     rel_l2 = rmse / float(np.sqrt((P_ref ** 2).mean()))
-    mass_pred = dx_ref * p_pred.sum(axis=1)              
+    mass_pred = dx_ref * p_pred.sum(axis=1)
+
     gln, glw = leggauss(401); half = 0.5 * (x_max - x_min)
     xgl = torch.tensor(0.5*(x_max+x_min) + half*gln, device=device).view(-1, 1)
     wgl = half * glw
@@ -349,9 +331,6 @@ def train_forward(alpha=0.8, gamma=1.0, D=0.02,
                              mass_pred=mass_pred, mass_gl=mass_gl)
 
 
-# =====================================================================
-#  PART 5 
-# =====================================================================
 def plot_all(hist, ev):
     a = ev['alpha']
     fig, ax = plt.subplots(figsize=(7, 4.5), dpi=150)
@@ -393,3 +372,42 @@ def plot_all(hist, ev):
     ax[1].set_xlabel('t'); ax[1].set_ylabel('predicted total mass')
     ax[1].set_title('Mass conservation (should stay ~1)')
     ax[1].legend(); ax[1].grid(True, alpha=0.3); plt.tight_layout(); plt.show()
+
+
+if __name__ == "__main__":
+    RESULTS = {}
+    for ALPHA in (0.6, 0.8, 0.95):
+        print("\n" + "#" * 62)
+        print(f"#  TASK 1 (drift-sign fix) — alpha={ALPHA}  dtype={DTYPE}")
+        print("#" * 62)
+
+        grid_convergence_report(ALPHA, 1.0, 0.02, -0.25, 0.25, 0.5, 0.07)
+
+        model, hist, ev = train_forward(
+            alpha=ALPHA, gamma=1.0, D=0.02,
+            Nx_ref=401, T=0.5, Nt_ref=400, s_ic=0.07,
+            Nx_col=101, n_tc=64,
+            n_warm=2000, n_adam=8000, n_lbfgs=500,
+            lr=2e-3, w_pde=1.0, w_ic=20.0, w_bc=10.0,
+            hidden_layers=4, hidden=64, seed=0, log_every=1000,
+        )
+        plot_all(hist, ev)
+        RESULTS[ALPHA] = ev
+        print("\n" + "=" * 60)
+        print(f"  TASK 1 COMPLETE — alpha={ALPHA} (mean-reverting drift)")
+        print(f"  rel-L2 = {ev['rel_l2']:.3e}   RMSE = {ev['rmse']:.3e}   "
+              f"Linf = {ev['linf']:.3e}")
+        print(f"  mass GL-401 (accurate): {ev['mass_gl'].min():.5f} .. {ev['mass_gl'].max():.5f}")
+        print("=" * 60)
+
+    print("\n" + "=" * 60)
+    print("  TASK 1 SUMMARY — drift-sign fix, three alpha values")
+    print("  (compare against the OLD repulsive-drift numbers:")
+    print("   old: a=0.6 rel-L2=6.11e-3, a=0.8=4.05e-3, a=0.95=3.27e-3)")
+    print("=" * 60)
+    for a, ev in RESULTS.items():
+        print(f"  alpha={a:<4}  rel-L2={ev['rel_l2']:.3e}  RMSE={ev['rmse']:.3e}  "
+              f"Linf={ev['linf']:.3e}  GL-mass=[{ev['mass_gl'].min():.5f},{ev['mass_gl'].max():.5f}]")
+    print("  Expect: similar accuracy (physics correctness doesn't change PINN's ability")
+    print("  to match its reference), exact mass, and density now CONTRACTING toward")
+    print("  the OU equilibrium instead of spreading to the walls.")
