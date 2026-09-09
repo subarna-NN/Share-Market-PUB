@@ -408,7 +408,7 @@ if __name__ == "__main__":
     T_END = 1.0
 
     print("\n" + "#" * 62)
-    print(f"#  TASK 2 — EXACT OU VALIDATION, alpha={ALPHA}  dtype={DTYPE}")
+    print(f"# EXACT OU VALIDATION, alpha={ALPHA}  dtype={DTYPE}")
     print(f"#  domain [{XMIN},{XMAX}]  T={T_END}  (mean-reverting drift)")
     print("#" * 62)
 
@@ -426,7 +426,7 @@ if __name__ == "__main__":
     plot_all(hist, ev)
 
     print("\n" + "=" * 60)
-    print(f"  TASK 2 COMPLETE — alpha={ALPHA} (exact OU validation)")
+    print(f" COMPLETE — alpha={ALPHA} (exact OU validation)")
     print(f"  PINN vs numerical reference:  rel-L2 = {ev['rel_l2']:.3e}")
     if ev.get('p_exact') is not None:
         err_ex = ev['P_pred'] - ev['p_exact']
@@ -438,5 +438,5 @@ if __name__ == "__main__":
         print(f"  solver vs EXACT OU (sanity):  rel-L2 = {rel_ref_ex:.3e}")
     print(f"  mass GL-401 (accurate): {ev['mass_gl'].min():.5f} .. {ev['mass_gl'].max():.5f}")
     print("=" * 60)
-    print("  Success = PINN matches the CLOSED-FORM OU solution to <~1%.")
-    print("  This is accuracy against a true solution, not consistency between solvers.")
+    print(" ")
+    print(" ")
