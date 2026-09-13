@@ -105,7 +105,11 @@ D	0.0191 ± 0.0002	0.02
 
 # α stays accurate even when γ and D are also unknown — the parameters are not badly confounded.
 
-# 6. Overall conclusion
+
+# 6. Task 4
+fmpinn_task4_observation_model.py — Observation-model diagnostic on real S&P 500 (1985–2025): tests whether real market data provides the transient (known initial condition and t=0) that memory-order recovery requires, via long-memory, post-crash relaxation, distribution-shape, and window-noise diagnostics. (Refined with bootstrap confidence bands in Block 3, Part B.)
+
+# 7. Overall conclusion
 
 The three tasks together establish:
 
