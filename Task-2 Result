@@ -1,0 +1,42 @@
+##############################################################
+#  TASK 2 — EXACT OU VALIDATION, alpha=1.0  dtype=float64
+#  domain [-0.6,0.6]  T=1.0  (mean-reverting drift)
+##############################################################
+  [grid-convergence of reference]
+    (101,100)  mass t0=1.000000 tT=1.000000 drift=1.9e-14  min=6.34e-16
+    (201,200)  mass t0=1.000000 tT=1.000000 drift=4.2e-14  min=6.34e-16
+    (401,400)  mass t0=1.000000 tT=1.000000 drift=2.9e-13  min=6.34e-16
+    self rel-L2 (101 vs 201) = 9.412e-04
+    self rel-L2 (201 vs 401) = 3.753e-04  (shrinking => converged)
+[Exp1-v3] device=cuda dtype=float64 alpha=1.0 Nx_ref=401 Nx_col=101 n_tc=64
+  reference: mass t0=1.000000 tT=1.000000 drift=2.9e-13
+    [warm]     1/2000  ic=2.708e+00  943.5 ms/step  (1.1 it/s)
+    [warm]  1000/2000  ic=3.644e-04  9.2 ms/step  (108.5 it/s)
+    [warm]  2000/2000  ic=1.346e-05  8.7 ms/step  (114.6 it/s)
+        1/8000  total=1.119e+01  pde=1.119e+01  ic=1.345e-05  bc=1.427e-07  | 283.7 ms/step (3.5 it/s)
+     1000/8000  total=2.087e-03  pde=1.867e-03  ic=9.626e-06  bc=2.808e-06  | 34.3 ms/step (29.2 it/s)
+     2000/8000  total=7.406e-04  pde=6.195e-04  ic=5.529e-06  bc=1.050e-06  | 34.1 ms/step (29.3 it/s)
+     3000/8000  total=4.447e-04  pde=4.028e-04  ic=1.806e-06  bc=5.740e-07  | 34.0 ms/step (29.4 it/s)
+     4000/8000  total=2.829e-04  pde=2.548e-04  ic=1.189e-06  bc=4.274e-07  | 34.0 ms/step (29.4 it/s)
+     5000/8000  total=1.780e-04  pde=1.567e-04  ic=9.107e-07  bc=3.050e-07  | 34.2 ms/step (29.3 it/s)
+     6000/8000  total=1.368e-04  pde=1.196e-04  ic=7.414e-07  bc=2.345e-07  | 34.2 ms/step (29.2 it/s)
+     7000/8000  total=1.122e-03  pde=1.785e-04  ic=4.706e-05  bc=1.914e-07  | 34.2 ms/step (29.2 it/s)
+     8000/8000  total=8.925e-05  pde=7.660e-05  ic=5.711e-07  bc=1.235e-07  | 34.2 ms/step (29.2 it/s)
+  restored best Adam checkpoint (loss=6.864e-05)
+  L-BFGS: 9.482e-04 -> 5.228e-05  (5.0s)
+  total wall 296.3s
+  RMSE=2.8633e-03  Linf=1.3151e-02  rel-L2=1.9763e-03
+  mass dx*sum(401):  min=1.000000 max=1.000003
+  mass GL-401 (accurate): min=1.000000 max=1.000000
+  --- EXACT OU validation (alpha=1) ---
+  PINN   vs EXACT:  rel-L2=2.7313e-03  RMSE=3.9559e-03  Linf=1.9655e-02
+  solver vs EXACT:  rel-L2=7.8205e-04  (reference sanity check)
+============================================================
+  TASK 2 COMPLETE — alpha=1.0 (exact OU validation)
+  PINN vs numerical reference:  rel-L2 = 1.976e-03
+  PINN vs EXACT OU (decisive):  rel-L2 = 2.731e-03  RMSE = 3.956e-03
+  solver vs EXACT OU (sanity):  rel-L2 = 7.820e-04
+  mass GL-401 (accurate): 1.00000 .. 1.00000
+============================================================
+  Success = PINN matches the CLOSED-FORM OU solution to <~1%.
+  This is accuracy against a true solution, not consistency between solvers.
