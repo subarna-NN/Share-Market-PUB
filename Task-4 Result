@@ -1,0 +1,59 @@
+##############################################################
+#  FM-PINN TASK 4 — OBSERVATION MODEL DIAGNOSTIC (real S&P 500)
+##############################################################
+  Loading S&P 500 (1985-2025)...
+  10328 daily log-returns loaded.
+
+============================================================
+  D1 — long memory in |returns| (volatility clustering)
+============================================================
+    |return| autocorr at lag    1: 0.2748
+    |return| autocorr at lag    5: 0.3111
+    |return| autocorr at lag   10: 0.2508
+    |return| autocorr at lag   20: 0.1950
+    |return| autocorr at lag   50: 0.1227
+    |return| autocorr at lag  100: 0.0797
+    |return| autocorr at lag  200: 0.0283
+    decay shape: power-law R2=0.762 vs exponential R2=0.977 -> exponential (short memory)
+
+============================================================
+  D2 — post-crash volatility relaxation: power-law vs exponential
+============================================================
+    1987 Black Monday: weak/no relaxation signal
+    2000 dot-com: peak vol 0.0230, baseline 0.0109, power-law slope=0.12 (R2 0.05) vs exp (R2 0.02) -> POWER-LAW
+    2008 GFC: peak vol 0.0595, baseline 0.0124, power-law slope=-0.18 (R2 0.27) vs exp (R2 0.55) -> exponential
+    2020 COVID: peak vol 0.0715, baseline 0.0055, power-law slope=-0.01 (R2 0.00) vs exp (R2 0.13) -> exponential
+    2022 bear: peak vol 0.0236, baseline 0.0068, power-law slope=0.06 (R2 0.02) vs exp (R2 0.00) -> POWER-LAW
+
+============================================================
+  D3 — distribution-shape (kurtosis) relaxation after a shock
+============================================================
+    1987 Black Monday: pre-shock kurt=2.65 -> post at 50/100/200/400d = [np.float64(14.56), np.float64(25.28), np.float64(43.04), np.float64(73.83)]
+    2000 dot-com: pre-shock kurt=2.07 -> post at 50/100/200/400d = [np.float64(1.13), np.float64(1.19), np.float64(0.98), np.float64(1.19)]
+    2008 GFC: pre-shock kurt=0.36 -> post at 50/100/200/400d = [np.float64(-0.13), np.float64(0.43), np.float64(1.35), np.float64(4.19)]
+    2020 COVID: pre-shock kurt=2.70 -> post at 50/100/200/400d = [np.float64(0.57), np.float64(2.79), np.float64(6.41), np.float64(12.63)]
+    2022 bear: pre-shock kurt=0.75 -> post at 50/100/200/400d = [np.float64(-0.66), np.float64(-0.23), np.float64(-0.12), np.float64(0.92)]
+
+============================================================
+  D4 — how noisy is ONE window's density estimate?
+============================================================
+    window= 63 days (0.2yr): std spread=57% of mean, kurtosis spread=2.44
+    window=126 days (0.5yr): std spread=52% of mean, kurtosis spread=4.24
+    window=252 days (1.0yr): std spread=45% of mean, kurtosis spread=8.44
+    (large per-window spread = a single window's density is noisy;
+     real data gives ONE such density per window, unlike Task 3's resampling)
+============================================================
+  WHAT THIS TELLS US FOR THE HALF-PAGE (read against the evidence):
+============================================================
+  (a) p(x,t): the return distribution; best observed as it RELAXES
+      after a shock, NOT as a static rolling window.
+  (b) initial condition: the shocked (post-crash) return distribution.
+  (c) t=0: the crash/shock date — the one real-market event that
+      RESETS the system and gives a known start.
+  D1 tests whether memory exists at all (slow autocorr decay).
+  D2 tests whether post-crash relaxation is power-law (fractional)
+     vs exponential (Markovian) — the core justification.
+  D3/D4 test whether the transient is real and how noisy one window is.
+  If D1+D2 show long memory and power-law relaxation, the post-shock
+  observation model is defensible. If not, the honest conclusion is
+  that real data lacks a usable transient — a valid, important finding.
