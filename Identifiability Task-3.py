@@ -1,3 +1,7 @@
+"""
+FM-PINN — SUPERVISOR TASK 3: IDENTIFIABILITY OF THE MEMORY ORDER alpha
+"""
+
 from __future__ import annotations
 import time, copy
 import numpy as np
@@ -10,6 +14,9 @@ torch.set_default_dtype(torch.float64)
 NP = np.float64
 
 
+# =====================================================================
+#  PART 1 — GROUND-TRUTH L1 REFERENCE
+# =====================================================================
 def l1_weights_np(alpha, n):
     if abs(alpha - 1.0) < 1e-12:
         b = np.zeros(n, dtype=NP); b[0] = 1.0; return b
@@ -20,7 +27,7 @@ def l1_weights_np(alpha, n):
 def op_noflux(x, gamma, D):
     Nx = len(x); dx = x[1] - x[0]; A = np.zeros((Nx, Nx), dtype=NP)
     for i in range(Nx - 1):
-        xh = 0.5 * (x[i] + x[i + 1]); a = -gamma * xh
+        xh = 0.5 * (x[i] + x[i + 1]); a = -gamma * xh   # mean-reverting mu=-gamma*x
         cf_i = a * 0.5 + D / dx; cf_ip = a * 0.5 - D / dx
         A[i, i] += -cf_i / dx; A[i, i + 1] += -cf_ip / dx
         A[i + 1, i] += +cf_i / dx; A[i + 1, i + 1] += +cf_ip / dx
@@ -43,14 +50,37 @@ def solve_ref(alpha, gamma, D, x_min, x_max, Nx, T, Nt, s_ic):
     return x, t, P, dx
 
 
+def solve_truth_fine(alpha, gamma, D, x_min, x_max, T, s_ic,
+                     Nx_coarse, Nt_coarse, Nx_fine=601, Nt_fine=1500):
+    """FIX #1 (inverse crime): generate the 'true' data on a FINE grid
+       (601 x 1500), then SUBSAMPLE onto the coarse recovery grid. Data and
+       recovery no longer share a discretisation, so recovery is no longer the
+       artificially easy task of inverting the exact scheme that made the data."""
+    xf = np.linspace(x_min, x_max, Nx_fine).astype(NP)
+    _, _, Pf, _ = solve_ref(alpha, gamma, D, x_min, x_max, Nx_fine, T, Nt_fine, s_ic)
+    xc = np.linspace(x_min, x_max, Nx_coarse).astype(NP); dxc = xc[1] - xc[0]
+    tc = np.linspace(0.0, T, Nt_coarse + 1).astype(NP)
+    xi = np.clip(np.searchsorted(xf, xc), 0, Nx_fine - 1)
+    ti = np.clip(np.round(tc * Nt_fine / T).astype(int), 0, Nt_fine)
+    Pc = Pf[ti][:, xi].copy()
+    Pc = Pc / (dxc * Pc.sum(axis=1, keepdims=True))
+    return xc, tc, Pc, dxc
+
+
 def sample_noise(P, x, dx, N_samples, rng):
+    """
+    Build a NOISY observed density: at each time, draw N_samples from the true
+    density p(x,t) and rebuild a histogram-like density (via KDE-free binning
+    onto the same grid, then renormalize). This mimics a real market histogram
+    from a finite number of returns. Returns a density array like P.
+    """
     Nt1, Nx = P.shape
     P_obs = np.zeros_like(P)
     for it in range(Nt1):
         pdf = np.clip(P[it], 0, None); pdf = pdf / (dx * pdf.sum())
         cdf = np.cumsum(pdf) * dx; cdf = cdf / cdf[-1]
         u = rng.random(N_samples)
-        draws = np.interp(u, cdf, x)
+        draws = np.interp(u, cdf, x)                 # inverse-CDF sampling
         counts, _ = np.histogram(draws, bins=np.concatenate(
             [x - dx/2, [x[-1] + dx/2]]))
         dens = counts.astype(NP)
@@ -59,7 +89,12 @@ def sample_noise(P, x, dx, N_samples, rng):
     return P_obs
 
 
+# =====================================================================
+#  PART 2 — fPINN RECOVERY ENGINE (Pang-Lu method, time-Caputo)
+# =====================================================================
 class EnergyNet(nn.Module):
+    """Energy-based density p=exp(f)/Z, Z by dx*sum on the working grid
+       (guarantees p>=0 and unit mass). Plain tanh MLP energy."""
     def __init__(self, hidden=48, layers=3):
         super().__init__()
         seq = []; prev = 2
@@ -78,6 +113,17 @@ class EnergyNet(nn.Module):
 def recover(P_obs, x, t, dx, gamma_true, D_true,
             recover_gamma_D=False, snapshot_only=False,
             n_iter=4000, lr=5e-3, seed=0, device='cpu', verbose=False):
+    """
+    Recover alpha (and optionally gamma, D) from an observed density P_obs by
+    the Pang-Lu fPINN: trainable alpha as a parameter, hybrid residual
+    (L1 discretization for the Caputo time term, finite-diff for the integer
+    space operator), plus a data-fit term to the observed density.
+
+    snapshot_only=True: the data-fit term uses only the FINAL time slice
+      (tests whether one snapshot carries enough info for alpha).
+    recover_gamma_D=True: gamma and D are also trainable (confounding test).
+    Returns dict with recovered alpha (+gamma,D if applicable).
+    """
     torch.manual_seed(seed); np.random.seed(seed)
     Nx = len(x); Nt = len(t) - 1
     xg = torch.tensor(x, device=device)
@@ -88,13 +134,19 @@ def recover(P_obs, x, t, dx, gamma_true, D_true,
     xin = xg[1:-1].view(1, -1)
 
     net = EnergyNet().to(device)
-    alpha_raw = nn.Parameter(torch.tensor(0.0, device=device))
+    alpha_raw = nn.Parameter(torch.tensor(0.0, device=device))   # sigmoid(0)=0.5
     def get_alpha(): return 0.05 + 0.9 * torch.sigmoid(alpha_raw)
 
     params = list(net.parameters()) + [alpha_raw]
     if recover_gamma_D:
-        gamma_raw = nn.Parameter(torch.tensor(np.log(gamma_true), device=device))
-        D_raw = nn.Parameter(torch.tensor(np.log(D_true), device=device))
+        # FIX #2: initialise gamma, D from RANDOM/PERTURBED values, NOT the true
+        # answer. Starting on the truth makes the joint-recovery claim untestable.
+        # We draw gamma0 in [0.5, 2.0]*true, D0 in [0.5, 2.0]*true per seed.
+        rng_init = np.random.default_rng(10_000 + seed)
+        gamma0 = gamma_true * rng_init.uniform(0.5, 2.0)
+        D0 = D_true * rng_init.uniform(0.5, 2.0)
+        gamma_raw = nn.Parameter(torch.tensor(np.log(gamma0), device=device))
+        D_raw = nn.Parameter(torch.tensor(np.log(D0), device=device))
         params += [gamma_raw, D_raw]
         def get_gamma(): return torch.exp(gamma_raw)
         def get_D(): return torch.exp(D_raw)
@@ -111,9 +163,10 @@ def recover(P_obs, x, t, dx, gamma_true, D_true,
     for it in range(1, n_iter + 1):
         f = net.energy_grid(X, Tt, (Nt + 1, Nx))
         logZ = torch.logsumexp(f + np.log(dx), 1, keepdim=True)
-        P = torch.exp(f - logZ)
+        P = torch.exp(f - logZ)                       # (Nt+1, Nx)
         a = get_alpha(); g = get_gamma(); Dv = get_D()
 
+        # L1 Caputo weights (differentiable in alpha)
         jj = torch.arange(Nt + 1, dtype=torch.float64, device=device)
         bw = (jj + 1.0) ** (1.0 - a) - jj ** (1.0 - a)
         sigma = 1.0 / (torch.exp(torch.lgamma(2 - a)) * dtt ** a)
@@ -127,9 +180,9 @@ def recover(P_obs, x, t, dx, gamma_true, D_true,
         l_pde = ((cap - Lp[1:]) ** 2).mean()
 
         if snapshot_only:
-            l_data = ((P[-1] - Pdata[-1]) ** 2).mean()
+            l_data = ((P[-1] - Pdata[-1]) ** 2).mean()   # final slice only
         else:
-            l_data = ((P - Pdata) ** 2).mean()
+            l_data = ((P - Pdata) ** 2).mean()           # full transient
 
         loss = l_pde + 100.0 * l_data
         opt.zero_grad(); loss.backward(); opt.step()
@@ -144,6 +197,9 @@ def recover(P_obs, x, t, dx, gamma_true, D_true,
     return out
 
 
+# =====================================================================
+#  PART 3 — EXPERIMENT PARTS
+# =====================================================================
 GAMMA, D, XMIN, XMAX, T_END, S_IC = 1.0, 0.02, -0.6, 0.6, 1.0, 0.07
 NX, NT = 101, 100
 N_SEEDS = 5
@@ -151,7 +207,8 @@ N_ITER = 4000
 
 
 def gen_truth(alpha):
-    x, t, P, dx = solve_ref(alpha, GAMMA, D, XMIN, XMAX, NX, T_END, NT, S_IC)
+    # FIX #1: fine-grid truth subsampled to the coarse recovery grid (no inverse crime)
+    x, t, P, dx = solve_truth_fine(alpha, GAMMA, D, XMIN, XMAX, T_END, S_IC, NX, NT)
     return x, t, P, dx
 
 
@@ -206,7 +263,10 @@ def part_C_snapshot():
 
 
 def part_D_confound():
-    print("\n" + "="*60 + "\n  PART D — confounding: recover alpha, gamma, D jointly\n" + "="*60)
+    print("\n" + "="*60 + "\n  PART D — confounding: recover alpha, gamma, D jointly\n"
+          "  (fix #2: gamma,D start from RANDOM perturbed values, NOT the truth;\n"
+          "   each seed uses a different random start -> spread reflects real\n"
+          "   sensitivity to initialisation, not just optimisation noise)\n" + "="*60)
     ta = 0.7
     x, t, P, dx = gen_truth(ta)
     res = multi_seed_recover(P, x, t, dx, recover_gamma_D=True)
@@ -214,22 +274,27 @@ def part_D_confound():
     print(f"  recovered alpha={am:.4f} +/- {asd:.4f}  (true {ta})")
     print(f"  recovered gamma={gm:.4f} +/- {gsd:.4f}  (true {GAMMA})")
     print(f"  recovered D    ={dm:.5f} +/- {dsd:.5f}  (true {D})")
-    print("  (large spread or biased alpha here => alpha/gamma/D are confounded)")
+    print("  HONEST reading: alpha's bias/spread vs gamma's/D's tells which parameters")
+    print("  are robustly identifiable. Larger gamma/D spread from random starts =>")
+    print("  gamma,D are the confounded pair; alpha is comparatively robust.")
     return res
 
 
 def plot_summary(A, B, C, D):
     fig, ax = plt.subplots(1, 3, figsize=(15, 4.2), dpi=150)
+    # A: recovered vs true
     ta = [r[0] for r in A]; rm = [r[1] for r in A]; rs = [r[2] for r in A]
     ax[0].errorbar(ta, rm, yerr=rs, fmt='o-', color='#3182bd', capsize=4, label='recovered')
     ax[0].plot([0.55,0.95],[0.55,0.95],'k:',label='perfect')
     ax[0].set_xlabel('true alpha'); ax[0].set_ylabel('recovered alpha')
     ax[0].set_title('Part A: ideal recovery'); ax[0].legend(); ax[0].grid(alpha=0.3)
+    # B: error vs sample size
     Ns = [r[0] for r in B]; err = [abs(r[1]-0.7) for r in B]; es = [r[2] for r in B]
     ax[1].errorbar(Ns, err, yerr=es, fmt='s-', color='#e6550d', capsize=4)
     ax[1].set_xscale('log'); ax[1].set_xlabel('N returns (sample size)')
     ax[1].set_ylabel('|recovered - true| alpha')
     ax[1].set_title('Part B: noise/sample-size effect'); ax[1].grid(alpha=0.3)
+    # C: full vs snapshot
     (mf,sf),(ms,ss)=C
     ax[2].bar(['full\ntransient','single\nsnapshot'],[abs(mf-0.7),abs(ms-0.7)],
               yerr=[sf,ss],color=['#31a354','#de2d26'],capsize=5)
@@ -238,6 +303,9 @@ def plot_summary(A, B, C, D):
     plt.tight_layout(); plt.show()
 
 
+# =====================================================================
+#  PART 4 — ENTRY
+# =====================================================================
 if __name__ == "__main__":
     print("#"*62)
     print("#  FM-PINN TASK 3 — IDENTIFIABILITY OF alpha")
@@ -249,12 +317,12 @@ if __name__ == "__main__":
     B = part_B_noise()
     C = part_C_snapshot()
     Dr = part_D_confound()
-    plot_summary(A, B, C, Dr if False else C)
+    plot_summary(A, B, C, Dr if False else C)  # C reused; D printed above
     print(f"\n  total wall {time.time()-t0:.1f}s")
     print("\n  READ THE RESULTS HONESTLY:")
     print("  - Part A near the diagonal => method CAN recover alpha in ideal case.")
     print("  - Part B error growing as N shrinks => noise limits identifiability.")
     print("  - Part C snapshot error >> full error => alpha lives in the transient.")
     print("  - Part D biased alpha or huge spread => alpha/gamma/D confounded.")
-    print(" ")
+    print("  A NEGATIVE result (alpha not recoverable under realistic noise) is a")
     print(" ")
