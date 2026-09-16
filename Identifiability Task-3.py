@@ -1,5 +1,5 @@
 """
-FM-PINN — SUPERVISOR TASK 3: IDENTIFIABILITY OF THE MEMORY ORDER alpha
+FM-PINN —TASK 3: IDENTIFIABILITY OF THE MEMORY ORDER alpha
 """
 
 from __future__ import annotations
