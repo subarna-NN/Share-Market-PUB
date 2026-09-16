@@ -1,0 +1,50 @@
+##############################################################
+#  FM-PINN TASK 3 — IDENTIFIABILITY OF alpha
+#  5 seeds/case, 4000 iters, grid 101x100, domain [-0.6,0.6]
+#  recovery engine = Pang-Lu fPINN (time-Caputo), our validated solver
+##############################################################
+
+============================================================
+  PART A — ideal recovery (full transient, clean data)
+============================================================
+  true alpha=0.6: recovered 0.5862 +/- 0.0051  (err 0.0138)
+  true alpha=0.7: recovered 0.6928 +/- 0.0062  (err 0.0072)
+  true alpha=0.8: recovered 0.7980 +/- 0.0058  (err 0.0020)
+  true alpha=0.9: recovered 0.9049 +/- 0.0044  (err 0.0049)
+
+============================================================
+  PART B — sample-noise effect (histogram from N returns)
+============================================================
+  N=  250 returns: recovered alpha=0.7557 +/- 0.0053  (true 0.7, err 0.0557)
+  N= 1000 returns: recovered alpha=0.7113 +/- 0.0047  (true 0.7, err 0.0113)
+  N= 5000 returns: recovered alpha=0.6646 +/- 0.0032  (true 0.7, err 0.0354)
+
+============================================================
+  PART C — single snapshot vs full transient
+============================================================
+  FULL transient : recovered alpha=0.6928 +/- 0.0062  (err 0.0072)
+  SINGLE snapshot: recovered alpha=0.0676 +/- 0.0050  (err 0.6324)
+  (supervisor's prediction: single snapshot carries almost no alpha info)
+
+============================================================
+  PART D — confounding: recover alpha, gamma, D jointly
+  (fix #2: gamma,D start from RANDOM perturbed values, NOT the truth;
+   each seed uses a different random start -> spread reflects real
+   sensitivity to initialisation, not just optimisation noise)
+============================================================
+  recovered alpha=0.7010 +/- 0.0143  (true 0.7)
+  recovered gamma=1.0090 +/- 0.0705  (true 1.0)
+  recovered D    =0.02010 +/- 0.00091  (true 0.02)
+  HONEST reading: alpha's bias/spread vs gamma's/D's tells which parameters
+  are robustly identifiable. Larger gamma/D spread from random starts =>
+  gamma,D are the confounded pair; alpha is comparatively robust.
+
+  total wall 6917.8s
+
+  READ THE RESULTS HONESTLY:
+  - Part A near the diagonal => method CAN recover alpha in ideal case.
+  - Part B error growing as N shrinks => noise limits identifiability.
+  - Part C snapshot error >> full error => alpha lives in the transient.
+  - Part D biased alpha or huge spread => alpha/gamma/D confounded.
+  A NEGATIVE result (alpha not recoverable under realistic noise) is a
+  valid — it defines the limits of the method.
